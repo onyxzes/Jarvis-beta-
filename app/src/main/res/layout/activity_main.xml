@@ -114,14 +114,32 @@
             android:id="@+id/btnProbarVoz"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Probar voz de hombre"
+            android:text="Probar voz"
             android:textColor="#3FE0FF"
             android:backgroundTint="#0A1422" />
+
+        <Button
+            android:id="@+id/btnCambiarVoz"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Cambiar voz"
+            android:textColor="#3FE0FF"
+            android:backgroundTint="#0A1422"
+            android:layout_marginTop="10dp" />
+
+        <TextView
+            android:id="@+id/vozActual"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Voz: por defecto"
+            android:textColor="#6F93A6"
+            android:textSize="12sp"
+            android:paddingTop="10dp" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Próximamente: permisos de micrófono, notificaciones y accesibilidad; elegir IA; avisos de plata."
+            android:text="Tocá “Cambiar voz” hasta encontrar una de hombre que te guste. Queda guardada.\n\nPróximamente: permisos, elegir IA, avisos de plata."
             android:textColor="#6F93A6"
             android:textSize="13sp"
             android:paddingTop="16dp" />

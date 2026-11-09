@@ -18,9 +18,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var estado: TextView
     private lateinit var btnToggle: Button
+    private lateinit var vozActual: TextView
     private lateinit var pantallaActivar: View
     private lateinit var pantallaBoveda: View
     private lateinit var pantallaControl: View
+
+    // Lista de voces disponibles para elegir
+    private var voces: List<Voice> = emptyList()
+    private var indiceVoz = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,30 +36,29 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         estado = findViewById(R.id.estado)
         btnToggle = findViewById(R.id.btnToggle)
+        vozActual = findViewById(R.id.vozActual)
         pantallaActivar = findViewById(R.id.pantallaActivar)
         pantallaBoveda = findViewById(R.id.pantallaBoveda)
         pantallaControl = findViewById(R.id.pantallaControl)
 
-        // Navegación entre pantallas
         findViewById<Button>(R.id.navActivar).setOnClickListener { mostrar(0) }
         findViewById<Button>(R.id.navBoveda).setOnClickListener { mostrar(1) }
         findViewById<Button>(R.id.navControl).setOnClickListener { mostrar(2) }
 
-        // Botón grande Activar / Desactivar
         btnToggle.setOnClickListener {
             val activo = !prefs.getBoolean("activo", false)
             prefs.edit().putBoolean("activo", activo).apply()
             pintarEstado(activo)
-            if (activo) {
-                hablar("Jarvis activado. Estoy a tus órdenes.")
-            } else {
-                hablar("Apagándome. Nos vemos.")
-            }
+            if (activo) hablar("Jarvis activado. Estoy a tus órdenes.")
+            else hablar("Apagándome. Nos vemos.")
         }
 
-        // Probar voz de hombre
         findViewById<Button>(R.id.btnProbarVoz).setOnClickListener {
             hablar("Hola, soy Jarvis. Esta es mi voz.")
+        }
+
+        findViewById<Button>(R.id.btnCambiarVoz).setOnClickListener {
+            cambiarVoz()
         }
 
         pintarEstado(prefs.getBoolean("activo", false))
@@ -80,37 +84,67 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun hablar(texto: String) {
-        if (ttsListo) {
-            tts.speak(texto, TextToSpeech.QUEUE_FLUSH, null, "jarvis")
-        }
+        if (ttsListo) tts.speak(texto, TextToSpeech.QUEUE_FLUSH, null, "jarvis")
     }
 
     override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale("es", "ES")
-            elegirVozDeHombre()
-            ttsListo = true
+        if (status != TextToSpeech.SUCCESS) return
+        tts.language = Locale("es", "ES")
+        // Tono grave para que suene más masculino
+        tts.setPitch(0.75f)
+        tts.setSpeechRate(1.0f)
+        armarListaDeVoces()
+        cargarVozGuardada()
+        ttsListo = true
+    }
+
+    // Arma la lista: primero voces en español que funcionan sin internet,
+    // después el resto, así podés recorrerlas y quedarte con la que te guste.
+    private fun armarListaDeVoces() {
+        try {
+            val todas = tts.voices?.toList() ?: emptyList()
+            val es = todas.filter { it.locale.language == "es" }
+            val esLocales = es.filter { !it.isNetworkConnectionRequired }
+            val esRed = es.filter { it.isNetworkConnectionRequired }
+            val ordenadas = (esLocales + esRed).sortedBy { it.name }
+            voces = if (ordenadas.isNotEmpty()) ordenadas else todas.sortedBy { it.name }
+        } catch (e: Exception) {
+            voces = emptyList()
         }
     }
 
-    // Busca una voz masculina en español entre las instaladas
-    private fun elegirVozDeHombre() {
-        try {
-            val voces = tts.voices ?: return
-            var elegida: Voice? = null
-            for (v in voces) {
-                val lang = v.locale.language
-                if (lang != "es") continue
-                val nombre = v.name.lowercase()
-                if (nombre.contains("male") || nombre.contains("-m-") || nombre.endsWith("m")) {
-                    elegida = v
-                    break
-                }
-                if (elegida == null) elegida = v
+    private fun cargarVozGuardada() {
+        val guardada = prefs.getString("voz", null)
+        if (guardada != null) {
+            val i = voces.indexOfFirst { it.name == guardada }
+            if (i >= 0) {
+                indiceVoz = i
+                aplicarVoz(indiceVoz, hablar = false)
+                return
             }
-            if (elegida != null) tts.voice = elegida
+        }
+        if (voces.isNotEmpty()) aplicarVoz(0, hablar = false)
+    }
+
+    private fun cambiarVoz() {
+        if (voces.isEmpty()) {
+            hablar("No encontré otras voces instaladas.")
+            return
+        }
+        indiceVoz = (indiceVoz + 1) % voces.size
+        aplicarVoz(indiceVoz, hablar = true)
+    }
+
+    private fun aplicarVoz(i: Int, hablar: Boolean) {
+        if (i < 0 || i >= voces.size) return
+        val v = voces[i]
+        try {
+            tts.voice = v
+            prefs.edit().putString("voz", v.name).apply()
+            vozActual.text = "Voz ${i + 1} de ${voces.size}: ${v.name}"
+            if (hablar) hablar("Hola, soy Jarvis. ¿Te gusta esta voz?")
         } catch (e: Exception) {
-            // si falla, queda la voz por defecto
+            vozActual.text = "No pude usar esa voz, probá otra."
         }
     }
 
