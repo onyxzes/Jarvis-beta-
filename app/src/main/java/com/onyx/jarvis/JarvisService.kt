@@ -173,46 +173,59 @@ class JarvisService : Service(), RecognitionListener, TextToSpeech.OnInitListene
         }.toString()
 
         val prefs = getSharedPreferences("jarvis", MODE_PRIVATE)
-        var modelo = prefs.getString("modelo_ok", null)
-        if (modelo == null) {
-            modelo = descubrirModelo(key) ?: return false to "No encontré modelos disponibles para tu clave."
-            prefs.edit().putString("modelo_ok", modelo).apply()
-        }
 
-        try {
-            val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$modelo:generateContent")
-            val con = url.openConnection() as HttpURLConnection
-            con.requestMethod = "POST"
-            con.setRequestProperty("Content-Type", "application/json")
-            con.setRequestProperty("x-goog-api-key", key)
-            con.doOutput = true
-            con.connectTimeout = 20000
-            con.readTimeout = 30000
-            con.outputStream.use { it.write(body.toByteArray()) }
+        // Lista de modelos a probar: primero el que ya funcionó, después los descubiertos
+        val candidatos = LinkedHashSet<String>()
+        prefs.getString("modelo_ok", null)?.let { candidatos.add(it) }
+        candidatos.addAll(descubrirModelos(key))
+        if (candidatos.isEmpty()) return false to "No encontré modelos disponibles para tu clave."
 
-            val codigo = con.responseCode
-            val stream = if (codigo in 200..299) con.inputStream else con.errorStream
-            val txt = stream?.bufferedReader()?.use { it.readText() } ?: ""
-            con.disconnect()
+        var ultimoError = "No pude conectarme."
+        var intentos = 0
+        for (modelo in candidatos) {
+            if (intentos++ >= 6) break
+            try {
+                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$modelo:generateContent")
+                val con = url.openConnection() as HttpURLConnection
+                con.requestMethod = "POST"
+                con.setRequestProperty("Content-Type", "application/json")
+                con.setRequestProperty("x-goog-api-key", key)
+                con.doOutput = true
+                con.connectTimeout = 20000
+                con.readTimeout = 30000
+                con.outputStream.use { it.write(body.toByteArray()) }
 
-            if (codigo in 200..299) {
-                val respuesta = JSONObject(txt)
-                    .getJSONArray("candidates").getJSONObject(0)
-                    .getJSONObject("content").getJSONArray("parts")
-                    .getJSONObject(0).getString("text").trim()
-                return true to respuesta
+                val codigo = con.responseCode
+                val stream = if (codigo in 200..299) con.inputStream else con.errorStream
+                val txt = stream?.bufferedReader()?.use { it.readText() } ?: ""
+                con.disconnect()
+
+                if (codigo in 200..299) {
+                    val respuesta = JSONObject(txt)
+                        .getJSONArray("candidates").getJSONObject(0)
+                        .getJSONObject("content").getJSONArray("parts")
+                        .getJSONObject(0).getString("text").trim()
+                    prefs.edit().putString("modelo_ok", modelo).apply()
+                    return true to respuesta
+                }
+
+                ultimoError = "HTTP $codigo: " + txt.take(160)
+                // Clave o permiso mal: no sirve seguir probando modelos
+                if (codigo == 400 || codigo == 401 || codigo == 403) {
+                    prefs.edit().remove("modelo_ok").apply()
+                    return false to ultimoError
+                }
+                // 404 u otro: el modelo no sirve, probamos el siguiente
+                prefs.edit().remove("modelo_ok").apply()
+            } catch (e: Exception) {
+                ultimoError = e.message ?: "error de red"
             }
-
-            // El modelo guardado dejó de servir: lo borramos para redescubrir la próxima vez
-            if (codigo == 404) prefs.edit().remove("modelo_ok").apply()
-            return false to "HTTP $codigo: " + txt.take(180)
-        } catch (e: Exception) {
-            return false to (e.message ?: "error de red")
         }
+        return false to ultimoError
     }
 
-    // Pregunta a Google qué modelos admite esta clave y elige uno de texto (flash si hay)
-    private fun descubrirModelo(key: String): String? {
+    // Pregunta a Google qué modelos admite esta clave; devuelve nombres de texto, flash primero
+    private fun descubrirModelos(key: String): List<String> {
         return try {
             val url = URL("https://generativelanguage.googleapis.com/v1beta/models")
             val con = url.openConnection() as HttpURLConnection
@@ -223,9 +236,9 @@ class JarvisService : Service(), RecognitionListener, TextToSpeech.OnInitListene
             val stream = if (codigo in 200..299) con.inputStream else con.errorStream
             val txt = stream?.bufferedReader()?.use { it.readText() } ?: ""
             con.disconnect()
-            if (codigo !in 200..299) return null
+            if (codigo !in 200..299) return emptyList()
 
-            val modelos = JSONObject(txt).optJSONArray("models") ?: return null
+            val modelos = JSONObject(txt).optJSONArray("models") ?: return emptyList()
             val candidatos = ArrayList<String>()
             for (i in 0 until modelos.length()) {
                 val m = modelos.getJSONObject(i)
@@ -239,14 +252,16 @@ class JarvisService : Service(), RecognitionListener, TextToSpeech.OnInitListene
                 if (!sirve) continue
                 val nombre = m.optString("name").removePrefix("models/")
                 val n = nombre.lowercase()
-                if (n.contains("image") || n.contains("embedding") ||
-                    n.contains("tts") || n.contains("audio") || n.contains("vision")) continue
+                if (n.contains("image") || n.contains("embedding") || n.contains("tts") ||
+                    n.contains("audio") || n.contains("vision") || n.contains("learnlm")) continue
                 candidatos.add(nombre)
             }
-            candidatos.firstOrNull { it.lowercase().contains("flash") }
-                ?: candidatos.firstOrNull()
+            // Flash primero (más rápidos y gratis), después el resto
+            val flash = candidatos.filter { it.lowercase().contains("flash") }
+            val resto = candidatos.filter { !it.lowercase().contains("flash") }
+            flash + resto
         } catch (e: Exception) {
-            null
+            emptyList()
         }
     }
 
