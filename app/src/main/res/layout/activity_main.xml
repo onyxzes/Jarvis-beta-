@@ -92,14 +92,18 @@
     </LinearLayout>
 
     <!-- Pantalla CONTROL -->
-    <LinearLayout
+    <ScrollView
         android:id="@+id/pantallaControl"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:orientation="vertical"
-        android:padding="20dp"
         android:visibility="gone">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
 
         <TextView
             android:layout_width="wrap_content"
@@ -139,11 +143,51 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Tocá “Cambiar voz” hasta encontrar una de hombre que te guste. Queda guardada.\n\nPróximamente: permisos, elegir IA, avisos de plata."
+            android:text="Tocá “Cambiar voz” hasta encontrar una de hombre que te guste. Queda guardada."
             android:textColor="#6F93A6"
             android:textSize="13sp"
-            android:paddingTop="16dp" />
+            android:paddingTop="12dp"
+            android:paddingBottom="18dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Clave de Gemini (IA)"
+            android:textColor="#3FE0FF"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/campoClave"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Pegá acá tu clave de Gemini"
+            android:textColorHint="#55707F"
+            android:textColor="#D8F6FF"
+            android:textSize="14sp"
+            android:background="#0A1422"
+            android:padding="12dp"
+            android:layout_marginTop="8dp" />
+
+        <Button
+            android:id="@+id/btnGuardarClave"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Guardar clave"
+            android:textColor="#04080F"
+            android:backgroundTint="#3FE0FF"
+            android:layout_marginTop="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Sacá tu clave gratis en aistudio.google.com/apikey\n\nPróximamente: leer notificaciones, buscar gastos y chats, control del teléfono."
+            android:textColor="#6F93A6"
+            android:textSize="13sp"
+            android:paddingTop="16dp"
+            android:paddingBottom="24dp" />
     </LinearLayout>
+    </ScrollView>
 
     <!-- Barra inferior -->
     <LinearLayout

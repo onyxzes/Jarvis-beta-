@@ -1,10 +1,18 @@
 package com.onyx.jarvis
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import java.util.Locale
 import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
@@ -19,11 +27,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var estado: TextView
     private lateinit var btnToggle: Button
     private lateinit var vozActual: TextView
+    private lateinit var campoClave: EditText
     private lateinit var pantallaActivar: View
     private lateinit var pantallaBoveda: View
     private lateinit var pantallaControl: View
 
-    // Lista de voces disponibles para elegir
     private var voces: List<Voice> = emptyList()
     private var indiceVoz = 0
 
@@ -37,6 +45,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         estado = findViewById(R.id.estado)
         btnToggle = findViewById(R.id.btnToggle)
         vozActual = findViewById(R.id.vozActual)
+        campoClave = findViewById(R.id.campoClave)
         pantallaActivar = findViewById(R.id.pantallaActivar)
         pantallaBoveda = findViewById(R.id.pantallaBoveda)
         pantallaControl = findViewById(R.id.pantallaControl)
@@ -46,24 +55,74 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         findViewById<Button>(R.id.navControl).setOnClickListener { mostrar(2) }
 
         btnToggle.setOnClickListener {
-            val activo = !prefs.getBoolean("activo", false)
-            prefs.edit().putBoolean("activo", activo).apply()
-            pintarEstado(activo)
-            if (activo) hablar("Jarvis activado. Estoy a tus órdenes.")
-            else hablar("Apagándome. Nos vemos.")
+            val activar = !prefs.getBoolean("activo", false)
+            if (activar) {
+                if (pedirPermisos()) encender()
+            } else {
+                apagar()
+            }
         }
 
         findViewById<Button>(R.id.btnProbarVoz).setOnClickListener {
             hablar("Hola, soy Jarvis. Esta es mi voz.")
         }
+        findViewById<Button>(R.id.btnCambiarVoz).setOnClickListener { cambiarVoz() }
 
-        findViewById<Button>(R.id.btnCambiarVoz).setOnClickListener {
-            cambiarVoz()
+        findViewById<Button>(R.id.btnGuardarClave).setOnClickListener {
+            val k = campoClave.text.toString().trim()
+            prefs.edit().putString("gemini_key", k).apply()
+            Toast.makeText(this, "Clave guardada", Toast.LENGTH_SHORT).show()
         }
+        campoClave.setText(prefs.getString("gemini_key", ""))
 
         pintarEstado(prefs.getBoolean("activo", false))
         mostrar(0)
     }
+
+    // --- Encendido / apagado del servicio que escucha ---
+
+    private fun encender() {
+        prefs.edit().putBoolean("activo", true).apply()
+        pintarEstado(true)
+        val i = Intent(this, JarvisService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i)
+        else startService(i)
+    }
+
+    private fun apagar() {
+        prefs.edit().putBoolean("activo", false).apply()
+        pintarEstado(false)
+        stopService(Intent(this, JarvisService::class.java))
+        hablar("Apagándome. Nos vemos.")
+    }
+
+    private fun pedirPermisos(): Boolean {
+        val faltan = ArrayList<String>()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) faltan.add(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED) faltan.add(Manifest.permission.POST_NOTIFICATIONS)
+        if (faltan.isEmpty()) return true
+        ActivityCompat.requestPermissions(this, faltan.toTypedArray(), 1)
+        return false
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        val micOk = permissions.indexOf(Manifest.permission.RECORD_AUDIO).let {
+            it >= 0 && grantResults.getOrNull(it) == PackageManager.PERMISSION_GRANTED
+        }
+        if (micOk) {
+            encender()
+        } else {
+            Toast.makeText(this, "Necesito el micrófono para escucharte", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // --- Pantallas ---
 
     private fun mostrar(i: Int) {
         pantallaActivar.visibility = if (i == 0) View.VISIBLE else View.GONE
@@ -73,7 +132,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun pintarEstado(activo: Boolean) {
         if (activo) {
-            estado.text = "Activado"
+            estado.text = "Activado — escuchando"
             estado.setTextColor(0xFF3FE0FF.toInt())
             btnToggle.text = "APAGAR"
         } else {
@@ -83,6 +142,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    // --- Voz (prueba local en la app) ---
+
     private fun hablar(texto: String) {
         if (ttsListo) tts.speak(texto, TextToSpeech.QUEUE_FLUSH, null, "jarvis")
     }
@@ -90,16 +151,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status != TextToSpeech.SUCCESS) return
         tts.language = Locale("es", "ES")
-        // Tono grave para que suene más masculino
         tts.setPitch(0.75f)
-        tts.setSpeechRate(1.0f)
         armarListaDeVoces()
         cargarVozGuardada()
         ttsListo = true
     }
 
-    // Arma la lista: primero voces en español que funcionan sin internet,
-    // después el resto, así podés recorrerlas y quedarte con la que te guste.
     private fun armarListaDeVoces() {
         try {
             val todas = tts.voices?.toList() ?: emptyList()
@@ -117,22 +174,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val guardada = prefs.getString("voz", null)
         if (guardada != null) {
             val i = voces.indexOfFirst { it.name == guardada }
-            if (i >= 0) {
-                indiceVoz = i
-                aplicarVoz(indiceVoz, hablar = false)
-                return
-            }
+            if (i >= 0) { indiceVoz = i; aplicarVoz(indiceVoz, false); return }
         }
-        if (voces.isNotEmpty()) aplicarVoz(0, hablar = false)
+        if (voces.isNotEmpty()) aplicarVoz(0, false)
     }
 
     private fun cambiarVoz() {
-        if (voces.isEmpty()) {
-            hablar("No encontré otras voces instaladas.")
-            return
-        }
+        if (voces.isEmpty()) { hablar("No encontré otras voces instaladas."); return }
         indiceVoz = (indiceVoz + 1) % voces.size
-        aplicarVoz(indiceVoz, hablar = true)
+        aplicarVoz(indiceVoz, true)
     }
 
     private fun aplicarVoz(i: Int, hablar: Boolean) {
@@ -149,11 +199,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
-        try {
-            tts.stop()
-            tts.shutdown()
-        } catch (e: Exception) {
-        }
+        try { tts.stop(); tts.shutdown() } catch (e: Exception) {}
         super.onDestroy()
     }
 }
