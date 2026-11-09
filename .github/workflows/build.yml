@@ -20,6 +20,8 @@ jobs:
 
       - name: Preparar Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
       - name: Preparar Gradle
         uses: gradle/actions/setup-gradle@v3
