@@ -176,8 +176,8 @@ class JarvisService : Service(), RecognitionListener, TextToSpeech.OnInitListene
 
         // Lista de modelos a probar: primero el que ya funcionó, después los descubiertos
         val candidatos = LinkedHashSet<String>()
-        prefs.getString("modelo_ok", null)?.let { candidatos.add(it) }
         candidatos.addAll(descubrirModelos(key))
+        prefs.getString("modelo_ok", null)?.let { candidatos.add(it) }
         if (candidatos.isEmpty()) return false to "No encontré modelos disponibles para tu clave."
 
         var ultimoError = "No pude conectarme."
@@ -221,7 +221,8 @@ class JarvisService : Service(), RecognitionListener, TextToSpeech.OnInitListene
                 ultimoError = e.message ?: "error de red"
             }
         }
-        return false to ultimoError
+        val lista = candidatos.take(6).joinToString(", ")
+        return false to "Probé: [$lista]. Último: $ultimoError"
     }
 
     // Pregunta a Google qué modelos admite esta clave; devuelve nombres de texto, flash primero
