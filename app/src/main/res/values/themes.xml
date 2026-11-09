@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Jarvis" parent="Theme.Material3.DynamicColors.DayNight">
+        <item name="android:statusBarColor">#04080F</item>
+    </style>
+</resources>
