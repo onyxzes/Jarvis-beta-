@@ -146,59 +146,68 @@ class JarvisService : Service(), RecognitionListener, TextToSpeech.OnInitListene
         actualizarNotif("Pensando: " + pregunta)
         hablar("Dame un segundo.")
         fondo.execute {
-            val respuesta = llamarGemini(pregunta)
-            hablar(respuesta)
-            actualizarNotif("Jarvis activo. Decí \"Jarvis\".")
+            val (ok, texto) = llamarGemini(pregunta)
+            if (ok) {
+                hablar(texto)
+                actualizarNotif("Jarvis activo. Decí \"Jarvis\".")
+            } else {
+                hablar("Hubo un error con la IA. Te lo dejé en la notificación.")
+                actualizarNotif("Error IA: " + texto.take(140))
+            }
         }
     }
 
-    private fun llamarGemini(pregunta: String): String {
-        val prefs = getSharedPreferences("jarvis", MODE_PRIVATE)
-        val key = prefs.getString("gemini_key", "") ?: ""
-        if (key.isBlank()) {
-            return "Todavía no cargaste la clave de Gemini. Ponela en la pantalla Control."
-        }
-        return try {
-            val url = URL(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + key
-            )
-            val con = url.openConnection() as HttpURLConnection
-            con.requestMethod = "POST"
-            con.setRequestProperty("Content-Type", "application/json")
-            con.doOutput = true
-            con.connectTimeout = 20000
-            con.readTimeout = 30000
+    // Prueba varios modelos; devuelve (ok, respuesta o error detallado)
+    private fun llamarGemini(pregunta: String): Pair<Boolean, String> {
+        val key = getSharedPreferences("jarvis", MODE_PRIVATE).getString("gemini_key", "")?.trim() ?: ""
+        if (key.isBlank()) return false to "Falta la clave de Gemini (pantalla Control)."
 
-            val prompt = "Sos Jarvis, un asistente personal. Respondé en español, " +
-                "en pocas frases, claro y directo. Pregunta: " + pregunta
-            val body = JSONObject().apply {
-                put("contents", org.json.JSONArray().put(
-                    JSONObject().put("parts", org.json.JSONArray().put(
-                        JSONObject().put("text", prompt)
-                    ))
+        val prompt = "Sos Jarvis, un asistente personal. Respondé en español, " +
+            "en pocas frases, claro y directo. Pregunta: " + pregunta
+        val body = JSONObject().apply {
+            put("contents", org.json.JSONArray().put(
+                JSONObject().put("parts", org.json.JSONArray().put(
+                    JSONObject().put("text", prompt)
                 ))
-            }
-            con.outputStream.use { it.write(body.toString().toByteArray()) }
+            ))
+        }.toString()
 
-            val codigo = con.responseCode
-            val stream = if (codigo in 200..299) con.inputStream else con.errorStream
-            val txt = stream.bufferedReader().use { it.readText() }
-            con.disconnect()
+        val modelos = listOf("gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-1.5-flash")
+        var ultimoError = "No pude conectarme."
 
-            if (codigo !in 200..299) {
-                return "La IA dio un error. Revisá que la clave de Gemini sea válida."
+        for (modelo in modelos) {
+            try {
+                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$modelo:generateContent")
+                val con = url.openConnection() as HttpURLConnection
+                con.requestMethod = "POST"
+                con.setRequestProperty("Content-Type", "application/json")
+                con.setRequestProperty("x-goog-api-key", key)
+                con.doOutput = true
+                con.connectTimeout = 20000
+                con.readTimeout = 30000
+                con.outputStream.use { it.write(body.toByteArray()) }
+
+                val codigo = con.responseCode
+                val stream = if (codigo in 200..299) con.inputStream else con.errorStream
+                val txt = stream?.bufferedReader()?.use { it.readText() } ?: ""
+                con.disconnect()
+
+                if (codigo in 200..299) {
+                    val respuesta = JSONObject(txt)
+                        .getJSONArray("candidates").getJSONObject(0)
+                        .getJSONObject("content").getJSONArray("parts")
+                        .getJSONObject(0).getString("text").trim()
+                    return true to respuesta
+                }
+
+                ultimoError = "HTTP $codigo: " + txt.take(180)
+                // Si es problema de clave o permiso, no sirve probar otros modelos
+                if (codigo == 400 || codigo == 401 || codigo == 403) return false to ultimoError
+            } catch (e: Exception) {
+                ultimoError = e.message ?: "error de red"
             }
-            val json = JSONObject(txt)
-            json.getJSONArray("candidates")
-                .getJSONObject(0)
-                .getJSONObject("content")
-                .getJSONArray("parts")
-                .getJSONObject(0)
-                .getString("text")
-                .trim()
-        } catch (e: Exception) {
-            "No pude conectarme con la IA. Fijate que tengas internet."
         }
+        return false to ultimoError
     }
 
     private fun aplicarVozGuardada() {
