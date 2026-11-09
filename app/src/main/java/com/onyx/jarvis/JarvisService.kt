@@ -143,6 +143,13 @@ class JarvisService : Service(), RecognitionListener, TextToSpeech.OnInitListene
     override fun onTimeout() {}
 
     private fun responderConIA(pregunta: String) {
+        // Respuestas instantáneas que no necesitan IA
+        val rapida = respuestaLocal(pregunta)
+        if (rapida != null) {
+            hablar(rapida)
+            actualizarNotif("Jarvis activo. Decí \"Jarvis\".")
+            return
+        }
         actualizarNotif("Pensando: " + pregunta)
         hablar("Dame un segundo.")
         fondo.execute {
@@ -157,13 +164,32 @@ class JarvisService : Service(), RecognitionListener, TextToSpeech.OnInitListene
         }
     }
 
+    // Respuestas que el celular puede dar al instante, sin IA
+    private fun respuestaLocal(texto: String): String? {
+        val t = texto.lowercase()
+        val ahora = java.util.Date()
+        if (t.contains("hora")) {
+            val h = java.text.SimpleDateFormat("HH:mm", Locale("es", "ES")).format(ahora)
+            return "Son las $h."
+        }
+        if (t.contains("fecha") || t.contains("que dia") || t.contains("qué día") ||
+            t.contains("dia es") || t.contains("día es") || t.contains("que fecha")) {
+            val f = java.text.SimpleDateFormat("EEEE d 'de' MMMM", Locale("es", "ES")).format(ahora)
+            return "Hoy es $f."
+        }
+        return null
+    }
+
     // Prueba varios modelos; devuelve (ok, respuesta o error detallado)
     private fun llamarGemini(pregunta: String): Pair<Boolean, String> {
         val key = getSharedPreferences("jarvis", MODE_PRIVATE).getString("gemini_key", "")?.trim() ?: ""
         if (key.isBlank()) return false to "Falta la clave de Gemini (pantalla Control)."
 
+        val ahora = java.text.SimpleDateFormat("EEEE d 'de' MMMM yyyy, HH:mm", Locale("es", "ES"))
+            .format(java.util.Date())
         val prompt = "Sos Jarvis, un asistente personal. Respondé en español, " +
-            "en pocas frases, claro y directo. Pregunta: " + pregunta
+            "en pocas frases, claro y directo. La fecha y hora actual es: $ahora. " +
+            "Pregunta: " + pregunta
         val body = JSONObject().apply {
             put("contents", org.json.JSONArray().put(
                 JSONObject().put("parts", org.json.JSONArray().put(
