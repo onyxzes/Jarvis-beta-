@@ -172,42 +172,82 @@ class JarvisService : Service(), RecognitionListener, TextToSpeech.OnInitListene
             ))
         }.toString()
 
-        val modelos = listOf("gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-1.5-flash")
-        var ultimoError = "No pude conectarme."
-
-        for (modelo in modelos) {
-            try {
-                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$modelo:generateContent")
-                val con = url.openConnection() as HttpURLConnection
-                con.requestMethod = "POST"
-                con.setRequestProperty("Content-Type", "application/json")
-                con.setRequestProperty("x-goog-api-key", key)
-                con.doOutput = true
-                con.connectTimeout = 20000
-                con.readTimeout = 30000
-                con.outputStream.use { it.write(body.toByteArray()) }
-
-                val codigo = con.responseCode
-                val stream = if (codigo in 200..299) con.inputStream else con.errorStream
-                val txt = stream?.bufferedReader()?.use { it.readText() } ?: ""
-                con.disconnect()
-
-                if (codigo in 200..299) {
-                    val respuesta = JSONObject(txt)
-                        .getJSONArray("candidates").getJSONObject(0)
-                        .getJSONObject("content").getJSONArray("parts")
-                        .getJSONObject(0).getString("text").trim()
-                    return true to respuesta
-                }
-
-                ultimoError = "HTTP $codigo: " + txt.take(180)
-                // Si es problema de clave o permiso, no sirve probar otros modelos
-                if (codigo == 400 || codigo == 401 || codigo == 403) return false to ultimoError
-            } catch (e: Exception) {
-                ultimoError = e.message ?: "error de red"
-            }
+        val prefs = getSharedPreferences("jarvis", MODE_PRIVATE)
+        var modelo = prefs.getString("modelo_ok", null)
+        if (modelo == null) {
+            modelo = descubrirModelo(key) ?: return false to "No encontré modelos disponibles para tu clave."
+            prefs.edit().putString("modelo_ok", modelo).apply()
         }
-        return false to ultimoError
+
+        try {
+            val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$modelo:generateContent")
+            val con = url.openConnection() as HttpURLConnection
+            con.requestMethod = "POST"
+            con.setRequestProperty("Content-Type", "application/json")
+            con.setRequestProperty("x-goog-api-key", key)
+            con.doOutput = true
+            con.connectTimeout = 20000
+            con.readTimeout = 30000
+            con.outputStream.use { it.write(body.toByteArray()) }
+
+            val codigo = con.responseCode
+            val stream = if (codigo in 200..299) con.inputStream else con.errorStream
+            val txt = stream?.bufferedReader()?.use { it.readText() } ?: ""
+            con.disconnect()
+
+            if (codigo in 200..299) {
+                val respuesta = JSONObject(txt)
+                    .getJSONArray("candidates").getJSONObject(0)
+                    .getJSONObject("content").getJSONArray("parts")
+                    .getJSONObject(0).getString("text").trim()
+                return true to respuesta
+            }
+
+            // El modelo guardado dejó de servir: lo borramos para redescubrir la próxima vez
+            if (codigo == 404) prefs.edit().remove("modelo_ok").apply()
+            return false to "HTTP $codigo: " + txt.take(180)
+        } catch (e: Exception) {
+            return false to (e.message ?: "error de red")
+        }
+    }
+
+    // Pregunta a Google qué modelos admite esta clave y elige uno de texto (flash si hay)
+    private fun descubrirModelo(key: String): String? {
+        return try {
+            val url = URL("https://generativelanguage.googleapis.com/v1beta/models")
+            val con = url.openConnection() as HttpURLConnection
+            con.setRequestProperty("x-goog-api-key", key)
+            con.connectTimeout = 20000
+            con.readTimeout = 30000
+            val codigo = con.responseCode
+            val stream = if (codigo in 200..299) con.inputStream else con.errorStream
+            val txt = stream?.bufferedReader()?.use { it.readText() } ?: ""
+            con.disconnect()
+            if (codigo !in 200..299) return null
+
+            val modelos = JSONObject(txt).optJSONArray("models") ?: return null
+            val candidatos = ArrayList<String>()
+            for (i in 0 until modelos.length()) {
+                val m = modelos.getJSONObject(i)
+                val metodos = m.optJSONArray("supportedGenerationMethods")
+                var sirve = false
+                if (metodos != null) {
+                    for (j in 0 until metodos.length()) {
+                        if (metodos.getString(j) == "generateContent") { sirve = true; break }
+                    }
+                }
+                if (!sirve) continue
+                val nombre = m.optString("name").removePrefix("models/")
+                val n = nombre.lowercase()
+                if (n.contains("image") || n.contains("embedding") ||
+                    n.contains("tts") || n.contains("audio") || n.contains("vision")) continue
+                candidatos.add(nombre)
+            }
+            candidatos.firstOrNull { it.lowercase().contains("flash") }
+                ?: candidatos.firstOrNull()
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun aplicarVozGuardada() {
